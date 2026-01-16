@@ -14,6 +14,7 @@ import {
   CheckCircle,
   Globe,
 } from 'lucide-react';
+import AgricultureAnalysis from '../components/Agriculture/AgricultureAnalysis';
 
 const Analysis = () => {
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -512,6 +513,11 @@ const Analysis = () => {
                   </Card.Body>
                 </Card>
               </div>
+
+              {/* Agricultural Analysis */}
+              {analysisResult.agricultural_data && (
+                <AgricultureAnalysis data={analysisResult.agricultural_data} />
+              )}
             </div>
           )}
 

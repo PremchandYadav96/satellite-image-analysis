@@ -403,6 +403,41 @@ function App() {
                 )}
               </div>
             )}
+
+            {result.agricultural_data && (
+              <div className="result-section">
+                <h2 className="section-title">🌾 Agricultural Analysis</h2>
+                <div className="agri-grid">
+                  <div className="agri-item">
+                    <h3 className="agri-subtitle">Crop Recommendations</h3>
+                    <p className="agri-value">
+                      {result.agricultural_data.crop_recommendations.recommended_crops.join(', ')}
+                    </p>
+                    <div className="agri-confidence">
+                      <span>Confidence: {result.agricultural_data.crop_recommendations.confidence}%</span>
+                      <div className="progress-bar">
+                        <div
+                          className="progress-fill agri"
+                          style={{ width: `${result.agricultural_data.crop_recommendations.confidence}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="agri-item">
+                    <h3 className="agri-subtitle">Crop Health</h3>
+                    <p
+                      className="agri-value"
+                      style={{
+                        color: result.agricultural_data.crop_health.color_code,
+                      }}
+                    >
+                      {result.agricultural_data.crop_health.status}
+                    </p>
+                    <span className="agri-label">Mean NDVI: {result.agricultural_data.crop_health.mean_ndvi}</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
