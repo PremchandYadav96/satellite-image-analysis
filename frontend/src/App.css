@@ -256,6 +256,42 @@
   color: #2d3748;
 }
 
+.agri-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+}
+
+.agri-item {
+  background-color: #f9fafb;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.agri-subtitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 8px;
+}
+
+.agri-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+  margin-bottom: 8px;
+}
+
+.agri-label {
+  font-size: 14px;
+  color: #4b5563;
+}
+
+.agri-confidence {
+  margin-top: 8px;
+}
+
 .land-cover-value {
   font-size: 2rem;
   font-weight: 700;

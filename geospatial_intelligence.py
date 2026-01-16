@@ -1043,6 +1043,40 @@ class EarthEngineService:
         labels = dw_image.select('label').unmask(-1)
         
         return labels, date_string
+
+    def get_s2_image_and_indices(self, polygon: ee.Geometry,
+                                 start_date: str = None, end_date: str = None) -> Tuple[ee.Image, Dict]:
+        """
+        Fetch Sentinel-2 image and calculate agricultural indices (NDVI, NDWI)
+
+        Args:
+            polygon: Earth Engine polygon geometry
+            start_date: Optional start date filter
+            end_date: Optional end date filter
+
+        Returns:
+            Tuple of (Sentinel-2 image, dictionary with ndvi and ndwi bands)
+        """
+        if not end_date:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
+
+        s2_collection = (ee.ImageCollection('COPERNICUS/S2_SR')
+                         .filterBounds(polygon)
+                         .filterDate(start_date, end_date)
+                         .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20)))
+
+        if s2_collection.size().getInfo() == 0:
+            raise RuntimeError("No Sentinel-2 images found for the specified period.")
+
+        s2_image = s2_collection.median()
+
+        # Calculate NDVI and NDWI
+        ndvi = s2_image.normalizedDifference(['B8', 'B4']).rename('ndvi')
+        ndwi = s2_image.normalizedDifference(['B3', 'B8']).rename('ndwi')
+
+        return s2_image, {'ndvi': ndvi, 'ndwi': ndwi}
     
     def _create_2km_tiles(self, geometry: ee.Geometry, bbox: BoundingBox) -> List[ee.Geometry]:
         """
@@ -2080,6 +2114,87 @@ class WeatherService:
         return forecast.get('list', [])[:days * 8]  # 8 forecasts per day
 
 
+class AgriculturalService:
+    """Provide agriculture-related analysis using satellite and weather data"""
+
+    def get_crop_recommendations(self, land_cover: LandCoverResult, weather: WeatherData,
+                                 ndvi_stats: Dict) -> Dict:
+        """
+        Generate crop recommendations based on land cover, weather, and NDVI
+
+        Args:
+            land_cover: Land cover percentages
+            weather: Current weather data
+            ndvi_stats: Dictionary with NDVI statistics (mean, stdDev)
+
+        Returns:
+            Dictionary with recommended crops and risk factors
+        """
+        recommendations = []
+        risks = []
+        confidence = 75  # Base confidence score
+
+        # Rule-based recommendations for Indian agriculture
+        if land_cover.vegetation > 40 and ndvi_stats.get('mean', 0) > 0.4:
+            if weather.temperature > 25 and weather.precipitation > 1:
+                recommendations.extend(["Rice", "Sugarcane"])
+                confidence += 10
+            elif weather.temperature > 20:
+                recommendations.extend(["Maize", "Cotton", "Soybean"])
+                confidence += 5
+
+        if land_cover.bare_land > 20 and weather.temperature > 22 and weather.precipitation < 2:
+            recommendations.extend(["Millet", "Sorghum"])
+            risks.append("Low soil moisture may require drought-resistant crops.")
+
+        if not recommendations:
+            recommendations.append("Mixed vegetables")
+
+        # Risk assessment
+        if weather.temperature > 38:
+            risks.append("High heat stress risk.")
+            confidence -= 10
+        if weather.precipitation < 1:
+            risks.append("Low rainfall, monitor for drought.")
+            confidence -= 5
+
+        return {
+            "recommended_crops": list(set(recommendations)),
+            "confidence": min(max(confidence, 0), 100),
+            "risk_factors": risks
+        }
+
+    def get_crop_health(self, ndvi_stats: Dict) -> Dict:
+        """
+        Assess crop health using NDVI trends
+
+        Args:
+            ndvi_stats: Dictionary with NDVI statistics
+
+        Returns:
+            Dictionary with color-coded health map and alerts
+        """
+        mean_ndvi = ndvi_stats.get('mean', 0)
+        health_status = "Unknown"
+        color_code = "grey"
+
+        if mean_ndvi > 0.6:
+            health_status = "Healthy"
+            color_code = "green"
+        elif 0.3 <= mean_ndvi <= 0.6:
+            health_status = "Moderate stress"
+            color_code = "yellow"
+        elif mean_ndvi < 0.3:
+            health_status = "Severe stress"
+            color_code = "red"
+
+        return {
+            "status": health_status,
+            "color_code": color_code,
+            "mean_ndvi": round(mean_ndvi, 3)
+        }
+
+
 class ClimateRiskCalculator:
     """Calculate climate risks based on weather and land cover data"""
     
@@ -2152,7 +2267,53 @@ class GeospatialIntelligenceSystem:
         self.disaster = DisasterService(openweather_key)
         self.risk_calculator = ClimateRiskCalculator()
         self.supabase = SupabaseService(supabase_url, supabase_key)
-    
+        self.agri_service = AgriculturalService()
+
+    def analyze_agriculture(self, polygon: ee.Geometry, land_cover: LandCoverResult,
+                              weather: WeatherData) -> Dict:
+        """
+        Perform agricultural analysis for a given area
+
+        Args:
+            polygon: Earth Engine geometry of the area
+            land_cover: Land cover data
+            weather: Weather data
+
+        Returns:
+            Dictionary with agricultural analysis results
+        """
+        try:
+            # Get NDVI stats for crop health and recommendations
+            _, indices = self.ee_service.get_s2_image_and_indices(polygon)
+            ndvi_band = indices['ndvi']
+
+            ndvi_stats = ndvi_band.reduceRegion(
+                reducer=ee.Reducer.mean().combine(ee.Reducer.stdDev(), '', True),
+                geometry=polygon,
+                scale=30,
+                maxPixels=1e9
+            ).getInfo()
+
+            # Remap keys for easier access
+            ndvi_stats = {
+                'mean': ndvi_stats.get('ndvi_mean'),
+                'stdDev': ndvi_stats.get('ndvi_stdDev')
+            }
+
+            # Get crop recommendations and health
+            crop_recommendations = self.agri_service.get_crop_recommendations(
+                land_cover, weather, ndvi_stats
+            )
+            crop_health = self.agri_service.get_crop_health(ndvi_stats)
+
+            return {
+                "crop_recommendations": crop_recommendations,
+                "crop_health": crop_health
+            }
+        except Exception as e:
+            # Return empty dict if agricultural analysis fails
+            return {}
+
     def analyze_locality(self, city_name: str, locality_name: str, 
                         locality_polygon: ee.Geometry, locality_bbox: BoundingBox,
                         start_date: str = None, end_date: str = None) -> Dict:
@@ -2423,6 +2584,9 @@ class GeospatialIntelligenceSystem:
             drought_risk = self.risk_calculator.calculate_drought_risk(
                 weather_data, land_cover, forecast_data
             )
+
+            # Perform agricultural analysis
+            agri_analysis = self.analyze_agriculture(geom, land_cover, weather_data)
             
             # Compile results (exact format as specified)
             result = {
@@ -2449,7 +2613,8 @@ class GeospatialIntelligenceSystem:
                 'heat_risk': heat_risk,
                 'drought_risk': drought_risk,
                 'satellite_source': 'Dynamic World',
-                'disasters': disasters
+                'disasters': disasters,
+                'agricultural_data': agri_analysis
             }
             
             return result
